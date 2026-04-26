@@ -1,0 +1,23 @@
+# ============================================
+# Netlify config - Lilo
+# ============================================
+
+[build]
+  publish    = "public"
+  functions  = "netlify/functions"
+
+# Roteia chamadas /api/* para as functions
+# Frontend chama fetch('/api/create-payment') normalmente
+[[redirects]]
+  from = "/api/*"
+  to   = "/.netlify/functions/:splat"
+  status = 200
+
+# SPA fallback (caso algum dia vire SPA)
+[[redirects]]
+  from = "/*"
+  to   = "/index.html"
+  status = 200
+
+[functions]
+  node_bundler = "esbuild"

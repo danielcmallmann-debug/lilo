@@ -1,8 +1,4 @@
 // netlify/functions/public-config.js
-// GET /api/public-config
-// Endpoint PÚBLICO — entrega apenas a Public Key e preços.
-// O Access Token JAMAIS sai daqui.
-
 const { json, corsPreflight, config } = require('./_shared');
 
 exports.handler = async (event) => {

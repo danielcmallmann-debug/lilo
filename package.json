@@ -1,7 +1,7 @@
 {
   "name": "lilo-netlify",
-  "version": "1.0.0",
-  "description": "Lilo SaaS - Netlify Functions + Supabase + Mercado Pago",
+  "version": "2.0.0",
+  "description": "Lilo SaaS - Netlify + Supabase + Mercado Pago Bricks",
   "private": true,
   "scripts": {
     "dev": "netlify dev",
@@ -9,8 +9,7 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",
-    "jsonwebtoken": "^9.0.2",
-    "bcryptjs": "^2.4.3"
+    "jsonwebtoken": "^9.0.2"
   },
   "engines": {
     "node": ">=18"

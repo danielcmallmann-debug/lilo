@@ -1,7 +1,5 @@
 // netlify/functions/subscription-status.js
 // GET /api/subscription-status
-// Auth: Bearer <jwt>
-// Retorna: status atual do pagamento e flag "active"
 
 const { supabase, json, corsPreflight, verifyToken } = require('./_shared');
 
@@ -15,11 +13,15 @@ exports.handler = async (event) => {
   try {
     const { data, error } = await supabase()
       .from('users')
-      .select('payment_status, plan_type, access_expires_at, auto_renew')
+      .select('payment_status, plan_type, access_expires_at, auto_renew, subscription_id')
       .eq('id', user.id)
       .maybeSingle();
 
-    if (error || !data) return json(404, { error: 'not_found' });
+    if (error) {
+      console.error('[subscription-status]', error);
+      return json(500, { error: 'database_error' });
+    }
+    if (!data) return json(404, { error: 'not_found' });
 
     const now     = new Date();
     const expires = data.access_expires_at ? new Date(data.access_expires_at) : null;
@@ -30,6 +32,7 @@ exports.handler = async (event) => {
       plan_type:         data.plan_type,
       access_expires_at: data.access_expires_at,
       auto_renew:        data.auto_renew,
+      subscription_id:   data.subscription_id,
       active,
     });
   } catch (err) {

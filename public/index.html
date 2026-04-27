@@ -2173,49 +2173,78 @@ const txFilters = (function(){
   };
 })();
 
-// ==================== INIT ====================
+
+// ==================== INIT (paywall decide tudo) ====================
 load();
 txFilters.init();
-if(state.currentUser)initApp();
-else document.getElementById('loginPage').style.display='flex';
+// IMPORTANTE: NÃO abre o app aqui. O paywall.bootstrap() decidirá.
+// Apenas mostra a tela de login se não tem token.
+if (!localStorage.getItem('lilo_jwt')) {
+  document.getElementById('loginPage').style.display = 'flex';
+}
 </script>
 
-<!-- ============================================================ -->
-<!-- ============== MÓDULO PAYWALL (isolado, novo) ============== -->
-<!-- ============================================================ -->
+<!-- ===================================================== -->
+<!-- ============ MERCADO PAGO BRICKS SDK ================ -->
+<!-- ===================================================== -->
+<script src="https://sdk.mercadopago.com/js/v2"></script>
+
+<!-- ===================================================== -->
+<!-- ============ PAYWALL + BRICKS UI ==================== -->
+<!-- ===================================================== -->
 <style>
-  .paywall-overlay{position:fixed;inset:0;background:rgba(11,13,17,0.92);backdrop-filter:blur(8px);z-index:400;display:none;align-items:center;justify-content:center;padding:20px}
+  .paywall-overlay{position:fixed;inset:0;background:rgba(11,13,17,0.94);backdrop-filter:blur(8px);z-index:400;display:none;align-items:center;justify-content:center;padding:20px;overflow-y:auto}
   .paywall-overlay.show{display:flex}
-  .paywall-card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:36px;width:560px;max-width:95vw;max-height:90vh;overflow-y:auto}
-  .paywall-icon{width:60px;height:60px;background:linear-gradient(135deg,var(--accent),#2AB87A);border-radius:18px;display:flex;align-items:center;justify-content:center;font-size:30px;margin:0 auto 16px}
-  .paywall-title{font-size:24px;font-weight:700;text-align:center;margin-bottom:8px}
-  .paywall-sub{font-size:13.5px;color:var(--text3);text-align:center;margin-bottom:28px;line-height:1.6}
-  .plan-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:24px}
-  .plan-card{background:var(--bg3);border:2px solid var(--border);border-radius:var(--radius);padding:20px;cursor:pointer;transition:all 0.15s;position:relative}
+  .paywall-card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:32px;width:560px;max-width:95vw;max-height:92vh;overflow-y:auto;margin:auto}
+  .paywall-icon{width:56px;height:56px;background:linear-gradient(135deg,var(--accent),#2AB87A);border-radius:18px;display:flex;align-items:center;justify-content:center;font-size:26px;margin:0 auto 14px}
+  .paywall-title{font-size:22px;font-weight:700;text-align:center;margin-bottom:6px}
+  .paywall-sub{font-size:13px;color:var(--text3);text-align:center;margin-bottom:24px;line-height:1.6}
+  .plan-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:20px}
+  .plan-card{background:var(--bg3);border:2px solid var(--border);border-radius:var(--radius);padding:18px;cursor:pointer;transition:all 0.15s;position:relative}
   .plan-card:hover{border-color:var(--border2)}
   .plan-card.selected{border-color:var(--accent);background:var(--accent-bg)}
   .plan-card.recommended::before{content:'MELHOR';position:absolute;top:-9px;right:14px;background:var(--accent);color:#0B0D11;font-size:10px;font-weight:700;padding:2px 9px;border-radius:10px;letter-spacing:0.05em}
-  .plan-name{font-size:13px;color:var(--text3);font-weight:500;margin-bottom:6px;text-transform:uppercase;letter-spacing:0.05em}
-  .plan-price{font-size:28px;font-weight:700;font-family:var(--mono)}
-  .plan-period{font-size:12.5px;color:var(--text3);margin-top:2px}
-  .plan-savings{font-size:11px;color:var(--accent);font-weight:600;margin-top:8px}
-  .paywall-features{display:flex;flex-direction:column;gap:9px;margin-bottom:22px;padding:16px 18px;background:var(--bg3);border-radius:var(--radius-sm)}
-  .paywall-feat{display:flex;align-items:center;gap:10px;font-size:13px;color:var(--text2)}
-  .paywall-feat::before{content:'✓';color:var(--accent);font-weight:700;flex-shrink:0}
-  .pw-status{padding:14px;border-radius:var(--radius-sm);margin-bottom:14px;font-size:12.5px;display:none}
+  .plan-name{font-size:12px;color:var(--text3);font-weight:500;margin-bottom:6px;text-transform:uppercase;letter-spacing:0.05em}
+  .plan-price{font-size:24px;font-weight:700;font-family:var(--mono)}
+  .plan-period{font-size:12px;color:var(--text3);margin-top:2px}
+  .plan-savings{font-size:11px;color:var(--accent);font-weight:600;margin-top:6px}
+
+  .pay-method-tabs{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:18px}
+  .pay-method-tab{border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px;text-align:center;cursor:pointer;background:var(--bg3);font-size:13px;font-weight:500;color:var(--text2);transition:all 0.15s}
+  .pay-method-tab:hover{border-color:var(--border2)}
+  .pay-method-tab.active{border-color:var(--accent);background:var(--accent-bg);color:var(--accent)}
+
+  .pw-status{padding:12px 14px;border-radius:var(--radius-sm);margin-bottom:14px;font-size:12.5px;display:none;line-height:1.5}
   .pw-status.error{background:rgba(240,112,112,0.1);color:var(--red);border:1px solid rgba(240,112,112,0.25)}
   .pw-status.pending{background:rgba(240,192,96,0.1);color:var(--amber);border:1px solid rgba(240,192,96,0.25)}
+  .pw-status.success{background:rgba(79,209,160,0.1);color:var(--accent);border:1px solid rgba(79,209,160,0.25)}
   .pw-status.show{display:block}
+
+  /* Pix display */
+  .pix-display{background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius);padding:18px;text-align:center;margin-bottom:14px;display:none}
+  .pix-display.show{display:block}
+  .pix-display img{max-width:200px;width:100%;background:#fff;padding:10px;border-radius:8px;margin:0 auto 12px;display:block}
+  .pix-copy-box{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px;font-family:var(--mono);font-size:11px;word-break:break-all;color:var(--text2);max-height:80px;overflow:auto;margin-bottom:10px;text-align:left}
+  .pix-info{font-size:12px;color:var(--text3);line-height:1.5}
+
+  /* Bricks container */
+  #cardBrickContainer{margin-bottom:14px;min-height:50px}
+
+  /* Pix payer form */
+  .pix-payer-form{display:flex;flex-direction:column;gap:10px;margin-bottom:14px}
+  .pix-payer-form input{background:var(--bg3);border:1px solid var(--border);border-radius:8px;color:var(--text);font-family:var(--font);font-size:13px;padding:10px 12px;outline:none}
+  .pix-payer-form input:focus{border-color:var(--accent)}
 </style>
 
 <div class="paywall-overlay" id="paywallOverlay">
   <div class="paywall-card">
     <div class="paywall-icon">🌿</div>
     <div class="paywall-title">Desbloqueie o Lilo Premium</div>
-    <div class="paywall-sub">Para continuar usando o assistente financeiro com IA, escolha um plano abaixo.</div>
+    <div class="paywall-sub">Para continuar usando o assistente financeiro com IA, escolha um plano e forma de pagamento.</div>
 
     <div class="pw-status" id="pwStatus"></div>
 
+    <!-- ESCOLHA DE PLANO -->
     <div class="plan-grid">
       <div class="plan-card selected" id="planMonthly" onclick="paywall.selectPlan('monthly')">
         <div class="plan-name">Mensal</div>
@@ -2230,52 +2259,78 @@ else document.getElementById('loginPage').style.display='flex';
       </div>
     </div>
 
-    <div class="paywall-features">
-      <div class="paywall-feat">Chat ilimitado com Lilo (IA)</div>
-      <div class="paywall-feat">Dashboard completo e gráficos</div>
-      <div class="paywall-feat">Controle de parcelas e fatura</div>
-      <div class="paywall-feat">Receitas recorrentes e salário</div>
-      <div class="paywall-feat">Filtros avançados de lançamentos</div>
+    <!-- ESCOLHA MÉTODO -->
+    <div class="pay-method-tabs">
+      <div class="pay-method-tab active" id="tabCard" onclick="paywall.selectMethod('card')">
+        💳 Cartão (renova auto)
+      </div>
+      <div class="pay-method-tab" id="tabPix" onclick="paywall.selectMethod('pix')">
+        ⚡ Pix (avulso)
+      </div>
     </div>
 
-    <button class="btn btn-primary" id="payNowBtn" style="width:100%;justify-content:center;padding:13px;font-size:14px" onclick="paywall.checkout()">
-      Pagar com Mercado Pago
-    </button>
-    <div style="text-align:center;margin-top:12px">
+    <!-- BRICK DO CARTÃO (recorrente) -->
+    <div id="cardSection">
+      <div id="cardBrickContainer"></div>
+    </div>
+
+    <!-- PIX (avulso) -->
+    <div id="pixSection" style="display:none">
+      <div class="pix-payer-form" id="pixForm">
+        <input type="text" id="pixName" placeholder="Nome completo">
+        <input type="text" id="pixCpf" placeholder="CPF (apenas números)" maxlength="14">
+        <button class="btn btn-primary" id="pixGenBtn" style="padding:12px;font-size:13px" onclick="paywall.generatePix()">Gerar Pix</button>
+      </div>
+      <div class="pix-display" id="pixDisplay">
+        <img id="pixQr" alt="QR Pix">
+        <div class="pix-copy-box" id="pixCopy"></div>
+        <button class="btn btn-ghost btn-sm" onclick="paywall.copyPix()" style="margin-bottom:10px">📋 Copiar código</button>
+        <div class="pix-info">Após o pagamento, seu acesso é liberado automaticamente em segundos.</div>
+      </div>
+    </div>
+
+    <div style="text-align:center;margin-top:16px">
       <a onclick="paywall.logout()" style="font-size:12px;color:var(--text3);cursor:pointer">Sair da conta</a>
     </div>
   </div>
 </div>
 
 <script>
-// ==================== MÓDULO PAYWALL (NOVO, ISOLADO) ====================
-// Não modifica nada do código anterior. Apenas:
-//   1. Adiciona token JWT no localStorage (chave separada)
-//   2. Reescreve doLogin/doRegister/doLogout para chamar a API real
-//   3. Após login, verifica /api/subscription-status
-//   4. Se não pago → mostra paywall
-//   5. Se pago → chama initApp() original (libera o app)
-//
-// A API base é resolvida automaticamente: /api em produção (Netlify),
-// http://localhost:8888/api em dev (netlify dev).
+// ============================================================
+// MÓDULO PAYWALL (com Mercado Pago Bricks)
+// ============================================================
 
 const paywall = (function(){
   const TOKEN_KEY = 'lilo_jwt';
   const API = '/api';
 
-  let selectedPlan = 'monthly';
-  let pricesLoaded = false;
+  let selectedPlan   = 'monthly';
+  let selectedMethod = 'card';
+  let mpInstance     = null;
+  let cardBrick      = null;
+  let pricesLoaded   = false;
+  let pollTimer      = null;
 
-  // ============== HTTP helper ==============
+  // ==================== HTTP ====================
   async function apiCall(path, opts = {}){
     const headers = { 'Content-Type': 'application/json', ...(opts.headers||{}) };
     const token = localStorage.getItem(TOKEN_KEY);
-    if(token) headers['Authorization'] = 'Bearer ' + token;
+    if (token) headers['Authorization'] = 'Bearer ' + token;
 
-    const res = await fetch(API + path, { ...opts, headers });
-    const data = await res.json().catch(()=>({}));
-    if(!res.ok){
-      const err = new Error(data.error || data.message || `HTTP ${res.status}`);
+    let res;
+    try {
+      res = await fetch(API + path, { ...opts, headers });
+    } catch (e) {
+      const err = new Error('Erro de rede: ' + e.message);
+      err.network = true;
+      throw err;
+    }
+
+    let data = {};
+    try { data = await res.json(); } catch {}
+
+    if (!res.ok) {
+      const err = new Error(data.error || data.message || 'HTTP ' + res.status);
       err.status = res.status;
       err.data = data;
       throw err;
@@ -2283,138 +2338,232 @@ const paywall = (function(){
     return data;
   }
 
-  // ============== Status no banner ==============
+  // ==================== STATUS UI ====================
   function showStatus(msg, type='error'){
     const el = document.getElementById('pwStatus');
-    if(!el) return;
     el.textContent = msg;
     el.className = 'pw-status ' + type + ' show';
   }
   function hideStatus(){
-    const el = document.getElementById('pwStatus');
-    if(el) el.classList.remove('show');
+    document.getElementById('pwStatus').classList.remove('show');
   }
 
-  // ============== Carregar preços ==============
-  async function loadPrices(){
-    if(pricesLoaded) return;
+  // ==================== CARREGAR PREÇOS + MP PUBLIC KEY ====================
+  async function loadConfig(){
+    if (pricesLoaded) return true;
     try {
-      const cfg = await fetch(API + '/public-config').then(r=>r.json());
-      if(cfg.plans){
+      const cfg = await apiCall('/public-config');
+      if (cfg.plans) {
         document.getElementById('priceMonthly').textContent = cfg.plans.monthly.price.toFixed(2).replace('.',',');
         document.getElementById('priceYearly').textContent  = cfg.plans.yearly.price.toFixed(2).replace('.',',');
         const econ = (1 - cfg.plans.yearly.price / (cfg.plans.monthly.price * 12)) * 100;
-        if(econ > 0){
+        if (econ > 0) {
           document.getElementById('savingsYearly').textContent = `Economize ~${Math.round(econ)}%`;
         }
       }
+      // Inicializa MP SDK
+      if (cfg.mp_public_key && window.MercadoPago) {
+        mpInstance = new window.MercadoPago(cfg.mp_public_key, { locale: 'pt-BR' });
+      }
       pricesLoaded = true;
-    } catch(e){
-      console.warn('[paywall] não foi possível carregar preços:', e.message);
+      return true;
+    } catch (e) {
+      console.error('[paywall] loadConfig:', e);
+      showStatus('Não foi possível carregar a configuração: ' + e.message);
+      return false;
     }
   }
 
-  // ============== Mostrar / esconder paywall ==============
-  function show(){
-    loadPrices();
-    document.getElementById('paywallOverlay').classList.add('show');
-    // Fechar a tela de login se estiver aberta
+  // ==================== SHOW / HIDE ====================
+  async function show(){
     document.getElementById('loginPage').style.display = 'none';
+    document.getElementById('paywallOverlay').classList.add('show');
+    const ok = await loadConfig();
+    if (ok) renderCardBrick();
   }
   function hide(){
     document.getElementById('paywallOverlay').classList.remove('show');
+    if (cardBrick && cardBrick.unmount) { try { cardBrick.unmount(); } catch {} cardBrick = null; }
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
   }
 
-  // ============== Após login: verifica subscription ==============
-  async function gateAccess(user){
+  // ==================== GATE ACCESS ====================
+  async function gateAccess(){
     try {
       const sub = await apiCall('/subscription-status');
-      if(sub.active){
-        // Pagamento ativo → libera app
+      if (sub.active) {
         hide();
-        if(typeof initApp === 'function') initApp();
+        if (typeof initApp === 'function') initApp();
       } else {
-        // Bloqueia → mostra paywall
-        if(sub.payment_status === 'pending'){
-          showStatus('Aguardando confirmação do pagamento...', 'pending');
-        } else if(sub.payment_status === 'rejected'){
-          showStatus('Seu último pagamento foi recusado. Tente novamente.', 'error');
-        } else {
-          hideStatus();
-        }
-        show();
+        if (sub.payment_status === 'pending') showStatus('Aguardando confirmação do pagamento...', 'pending');
+        else if (sub.payment_status === 'rejected') showStatus('Seu último pagamento foi recusado. Tente novamente.', 'error');
+        else hideStatus();
+        await show();
       }
-    } catch(e){
-      console.error('[paywall] gateAccess erro:', e);
-      showStatus('Não foi possível verificar sua assinatura. Tente novamente.', 'error');
-      show();
+    } catch (e) {
+      console.error('[paywall] gateAccess:', e);
+      if (e.status === 401) {
+        // Token inválido — limpa e volta pra login
+        localStorage.removeItem(TOKEN_KEY);
+        document.getElementById('loginPage').style.display = 'flex';
+        return;
+      }
+      showStatus('Não foi possível verificar sua assinatura: ' + e.message);
+      await show();
     }
   }
 
-  // ============== Iniciar checkout ==============
-  async function checkout(){
-    const btn = document.getElementById('payNowBtn');
-    btn.disabled = true;
-    btn.textContent = 'Criando pagamento...';
-    hideStatus();
-    try {
-      const res = await apiCall('/create-payment', {
-        method: 'POST',
-        body: JSON.stringify({ plan_type: selectedPlan }),
-      });
-      if(res.init_point){
-        window.location.href = res.init_point;
-      } else {
-        throw new Error('init_point não retornado');
-      }
-    } catch(e){
-      console.error('[paywall] checkout erro:', e);
-      showStatus(e.message || 'Erro ao criar pagamento', 'error');
-      btn.disabled = false;
-      btn.textContent = 'Pagar com Mercado Pago';
-    }
-  }
-
+  // ==================== SELEÇÃO ====================
   function selectPlan(p){
     selectedPlan = p;
     document.getElementById('planMonthly').classList.toggle('selected', p==='monthly');
     document.getElementById('planYearly').classList.toggle('selected', p==='yearly');
+    // Re-renderiza brick com novo valor
+    if (selectedMethod === 'card') renderCardBrick();
+  }
+  function selectMethod(m){
+    selectedMethod = m;
+    document.getElementById('tabCard').classList.toggle('active', m==='card');
+    document.getElementById('tabPix').classList.toggle('active', m==='pix');
+    document.getElementById('cardSection').style.display = m==='card' ? 'block' : 'none';
+    document.getElementById('pixSection').style.display  = m==='pix'  ? 'block' : 'none';
+    if (m === 'card') renderCardBrick();
   }
 
-  function logout(){
-    localStorage.removeItem(TOKEN_KEY);
-    hide();
-    if(typeof state !== 'undefined'){ state.currentUser = null; save(); }
-    document.getElementById('loginPage').style.display = 'flex';
+  // ==================== CARD BRICK (recorrente) ====================
+  async function renderCardBrick(){
+    if (!mpInstance) {
+      showStatus('SDK do Mercado Pago não carregou. Recarregue a página.');
+      return;
+    }
+    // Desmonta brick anterior se houver
+    if (cardBrick && cardBrick.unmount) { try { cardBrick.unmount(); } catch {} }
+
+    const cfg = await apiCall('/public-config');
+    const amount = cfg.plans[selectedPlan].price;
+
+    const bricksBuilder = mpInstance.bricks();
+
+    cardBrick = await bricksBuilder.create('cardPayment', 'cardBrickContainer', {
+      initialization: {
+        amount: amount,
+      },
+      customization: {
+        visual: {
+          style: { theme: 'dark' },
+        },
+        paymentMethods: { maxInstallments: 1 },
+      },
+      callbacks: {
+        onReady: () => { hideStatus(); },
+        onError: (error) => {
+          console.error('[brick] erro:', error);
+          showStatus('Erro no formulário: ' + (error.message || 'inválido'));
+        },
+        onSubmit: async (cardFormData) => {
+          // cardFormData.token = card_token gerado pelo SDK
+          showStatus('Processando pagamento...', 'pending');
+          try {
+            const res = await apiCall('/create-subscription', {
+              method: 'POST',
+              body: JSON.stringify({
+                plan_type: selectedPlan,
+                card_token_id: cardFormData.token,
+              }),
+            });
+            if (res.authorized) {
+              showStatus('✓ Pagamento aprovado! Liberando acesso...', 'success');
+              setTimeout(() => gateAccess(), 1500);
+            } else {
+              showStatus('Pagamento em análise. Aguardando aprovação...', 'pending');
+              startPolling();
+            }
+          } catch (e) {
+            console.error('[brick onSubmit]:', e);
+            showStatus(e.data?.message || e.message || 'Erro ao processar pagamento');
+            throw e; // necessário para o brick reabilitar o botão
+          }
+        },
+      },
+    });
   }
 
-  // ============== Override de doLogin/doRegister/doLogout ==============
-  // Salva referências às originais (mantém retrocompat se API estiver fora)
-  const _origLogin    = window.doLogin;
-  const _origRegister = window.doRegister;
-  const _origLogout   = window.doLogout;
+  // ==================== PIX ====================
+  async function generatePix(){
+    const name = document.getElementById('pixName').value.trim();
+    const cpf  = document.getElementById('pixCpf').value.replace(/\D/g, '');
+    if (!name) { showStatus('Informe seu nome'); return; }
+    if (cpf.length !== 11) { showStatus('CPF inválido'); return; }
+
+    const btn = document.getElementById('pixGenBtn');
+    btn.disabled = true; btn.textContent = 'Gerando...';
+    hideStatus();
+
+    try {
+      const res = await apiCall('/create-pix', {
+        method: 'POST',
+        body: JSON.stringify({
+          plan_type: selectedPlan,
+          payer: { name, cpf },
+        }),
+      });
+      document.getElementById('pixForm').style.display = 'none';
+      const display = document.getElementById('pixDisplay');
+      display.classList.add('show');
+      document.getElementById('pixQr').src = 'data:image/png;base64,' + res.qr_code_base64;
+      document.getElementById('pixCopy').textContent = res.qr_code;
+      window._pixCopyText = res.qr_code;
+      showStatus('Após o pagamento, seu acesso é liberado em segundos.', 'pending');
+      startPolling();
+    } catch (e) {
+      console.error('[pix]', e);
+      showStatus(e.data?.message || e.message || 'Erro ao gerar Pix');
+      btn.disabled = false; btn.textContent = 'Gerar Pix';
+    }
+  }
+
+  function copyPix(){
+    if (!window._pixCopyText) return;
+    navigator.clipboard.writeText(window._pixCopyText).then(()=>{
+      showToast('✓ Código Pix copiado!');
+    });
+  }
+
+  // ==================== POLLING ====================
+  function startPolling(){
+    if (pollTimer) clearInterval(pollTimer);
+    pollTimer = setInterval(async () => {
+      try {
+        const sub = await apiCall('/subscription-status');
+        if (sub.active) {
+          clearInterval(pollTimer);
+          showStatus('✓ Pagamento confirmado!', 'success');
+          setTimeout(() => { hide(); if (typeof initApp === 'function') initApp(); }, 1200);
+        }
+      } catch {}
+    }, 4000);
+  }
+
+  // ==================== AUTH (overrides) ====================
 
   window.doLogin = async function(){
     const email    = document.getElementById('loginEmail').value.trim();
     const password = document.getElementById('loginPassword').value;
-    if(!email || !password){ showToast('Preencha e-mail e senha','error'); return; }
+    if (!email || !password) { showToast('Preencha e-mail e senha','error'); return; }
 
     try {
       const res = await apiCall('/login', { method:'POST', body: JSON.stringify({email, password}) });
-      // Salva token e usuário
       localStorage.setItem(TOKEN_KEY, res.token);
       state.currentUser = res.user;
       save();
-      // Esconde tela de login + verifica acesso
       document.getElementById('loginPage').style.display = 'none';
-      await gateAccess(res.user);
-    } catch(e){
-      // Fallback DEMO: se API offline e for credencial demo, usa lógica antiga
-      if(e.status >= 500 || e.message.includes('Failed to fetch')){
-        console.warn('[paywall] API offline, fallback demo');
-        if(typeof _origLogin === 'function'){ _origLogin(); return; }
-      }
-      showToast(e.message || 'Falha no login','error');
+      await gateAccess();
+    } catch (e) {
+      console.error('[login]', e);
+      const msg = e.status === 401 ? 'E-mail ou senha incorretos'
+                : e.network ? 'Erro de conexão. Verifique sua internet.'
+                : (e.data?.detail || e.message || 'Falha no login');
+      showToast(msg, 'error');
     }
   };
 
@@ -2422,8 +2571,8 @@ const paywall = (function(){
     const name     = document.getElementById('regName').value.trim();
     const email    = document.getElementById('regEmail').value.trim();
     const password = document.getElementById('regPassword').value;
-    if(!name || !email || !password){ showToast('Preencha todos os campos','error'); return; }
-    if(password.length < 6){ showToast('Senha muito curta','error'); return; }
+    if (!name || !email || !password) { showToast('Preencha todos os campos','error'); return; }
+    if (password.length < 6) { showToast('Senha muito curta','error'); return; }
 
     try {
       const res = await apiCall('/register', { method:'POST', body: JSON.stringify({name, email, password}) });
@@ -2431,61 +2580,55 @@ const paywall = (function(){
       state.currentUser = res.user;
       save();
       document.getElementById('loginPage').style.display = 'none';
-      // Novo cadastro nunca tem pagamento → mostra paywall direto
-      show();
-    } catch(e){
-      if(e.status >= 500 || e.message.includes('Failed to fetch')){
-        if(typeof _origRegister === 'function'){ _origRegister(); return; }
-      }
-      showToast(e.message || 'Falha ao criar conta','error');
+      // Novo cadastro: paywall direto (não tem pagamento ainda)
+      await show();
+    } catch (e) {
+      console.error('[register]', e);
+      const msg = e.status === 409 ? 'E-mail já cadastrado'
+                : e.network ? 'Erro de conexão. Verifique sua internet.'
+                : (e.data?.detail || e.message || 'Falha ao criar conta');
+      showToast(msg, 'error');
     }
   };
 
   window.doLogout = function(){
     localStorage.removeItem(TOKEN_KEY);
-    if(typeof _origLogout === 'function') _origLogout();
+    state.currentUser = null;
+    save();
     hide();
+    document.getElementById('loginPage').style.display = 'flex';
   };
 
-  // ============== Detectar retorno do MP via query string ==============
-  function checkPaymentReturn(){
-    const params = new URLSearchParams(window.location.search);
-    const status = params.get('payment');
-    if(!status) return;
+  function logout(){ window.doLogout(); }
 
-    // Limpa URL para não repetir mensagem
-    window.history.replaceState({}, '', window.location.pathname);
-
-    if(status === 'success'){
-      showToast('✓ Pagamento confirmado! Liberando acesso...');
-      // Re-verifica em 2s (dar tempo do webhook processar)
-      setTimeout(()=>{
-        if(state.currentUser) gateAccess(state.currentUser);
-      }, 2000);
-    } else if(status === 'failure'){
-      showToast('Pagamento recusado. Tente novamente.','error');
-    } else if(status === 'pending'){
-      showToast('Pagamento pendente. Atualizaremos quando confirmado.');
-    }
-  }
-
-  // ============== Bootstrap ao carregar ==============
-  // Se já tinha currentUser carregado pelo load() original e existe token,
-  // valida o acesso. Senão, deixa a tela de login normal aparecer.
+  // ==================== BOOTSTRAP ====================
   function bootstrap(){
     const token = localStorage.getItem(TOKEN_KEY);
-    if(state.currentUser && token){
-      // Esconde a app até confirmar acesso
-      gateAccess(state.currentUser);
+    // Limpa estado se há user no localStorage mas sem token (cadastros antigos do fallback)
+    if (state.currentUser && !token) {
+      state.currentUser = null;
+      save();
+      document.getElementById('loginPage').style.display = 'flex';
+      return;
     }
-    checkPaymentReturn();
+    if (token && state.currentUser) {
+      gateAccess();
+    } else {
+      document.getElementById('loginPage').style.display = 'flex';
+    }
+    // Trata retorno de URL ?payment=success
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('payment')) {
+      window.history.replaceState({}, '', window.location.pathname);
+    }
   }
 
-  return { show, hide, checkout, selectPlan, logout, gateAccess, bootstrap };
+  return { show, hide, gateAccess, selectPlan, selectMethod, generatePix, copyPix, logout, bootstrap };
 })();
 
-// Bootstrap depois que tudo carregou
+// Bootstrap
 paywall.bootstrap();
 </script>
+
 </body>
 </html>

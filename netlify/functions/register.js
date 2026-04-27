@@ -2,7 +2,7 @@
 // POST /api/register
 // Body: { name, email, password }
 
-const { supabase, json, corsPreflight, signToken, bcrypt } = require('./_shared');
+const { supabase, json, corsPreflight, signToken, hashPassword } = require('./_shared');
 
 exports.handler = async (event) => {
   if (event.httpMethod === 'OPTIONS') return corsPreflight();
@@ -16,10 +16,16 @@ exports.handler = async (event) => {
 
     const sb = supabase();
 
-    const { data: existing } = await sb.from('users').select('id').eq('email', email).maybeSingle();
+    const { data: existing, error: chkErr } = await sb
+      .from('users').select('id').eq('email', email).maybeSingle();
+
+    if (chkErr) {
+      console.error('[register] erro ao checar email:', chkErr);
+      return json(500, { error: 'database_error', detail: chkErr.message });
+    }
     if (existing) return json(409, { error: 'e-mail já cadastrado' });
 
-    const password_hash = await bcrypt.hash(password, 10);
+    const password_hash = hashPassword(password);
 
     const { data, error } = await sb
       .from('users')
@@ -28,16 +34,17 @@ exports.handler = async (event) => {
       .single();
 
     if (error) {
-      console.error('[register]', error);
-      return json(500, { error: 'server_error' });
+      console.error('[register] erro ao inserir user:', error);
+      return json(500, { error: 'database_error', detail: error.message });
     }
 
+    console.log('[register] OK userId:', data.id);
     return json(201, {
       user: data,
       token: signToken(data),
     });
   } catch (err) {
-    console.error('[register]', err);
-    return json(500, { error: 'server_error' });
+    console.error('[register] exception:', err);
+    return json(500, { error: 'server_error', detail: err.message });
   }
 };

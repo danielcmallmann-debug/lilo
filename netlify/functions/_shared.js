@@ -1,12 +1,14 @@
 // netlify/functions/_shared.js
 // ===================================================
-// Helpers compartilhados entre todas as Functions.
-// Importado via: const shared = require('./_shared');
+// Helpers compartilhados.
+// - Sem bcryptjs (usa crypto nativo do Node, infalível em serverless)
+// - Cliente Supabase
+// - Cliente Mercado Pago (Bricks: pagamentos + assinaturas)
+// - Validação de webhook
 // ===================================================
 
 const { createClient } = require('@supabase/supabase-js');
 const jwt    = require('jsonwebtoken');
-const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 
 // ============== CONFIG ==============
@@ -35,11 +37,15 @@ const config = {
       price: parseFloat(env('PLAN_MONTHLY_PRICE', false) || '29.90'),
       title: 'Lilo Premium - Mensal',
       durationDays: 30,
+      frequency: 1,
+      frequencyType: 'months',
     },
     yearly: {
       price: parseFloat(env('PLAN_YEARLY_PRICE', false) || '299.00'),
       title: 'Lilo Premium - Anual',
       durationDays: 365,
+      frequency: 12,
+      frequencyType: 'months',
     },
   },
 };
@@ -76,6 +82,32 @@ function corsPreflight() {
   return { statusCode: 204, headers: CORS_HEADERS, body: '' };
 }
 
+// ============== PASSWORD HASHING (crypto nativo) ==============
+// Substitui bcryptjs. Usa PBKDF2 com 100k iterações + salt aleatório.
+// Formato armazenado: "pbkdf2$<iter>$<salt_b64>$<hash_b64>"
+
+const PBKDF2_ITER   = 100000;
+const PBKDF2_KEYLEN = 64;
+const PBKDF2_DIGEST = 'sha512';
+
+function hashPassword(plain) {
+  const salt = crypto.randomBytes(16);
+  const hash = crypto.pbkdf2Sync(plain, salt, PBKDF2_ITER, PBKDF2_KEYLEN, PBKDF2_DIGEST);
+  return `pbkdf2$${PBKDF2_ITER}$${salt.toString('base64')}$${hash.toString('base64')}`;
+}
+
+function verifyPassword(plain, stored) {
+  if (!stored || typeof stored !== 'string') return false;
+  const parts = stored.split('$');
+  if (parts.length !== 4 || parts[0] !== 'pbkdf2') return false;
+  const iter = parseInt(parts[1], 10);
+  const salt = Buffer.from(parts[2], 'base64');
+  const expected = Buffer.from(parts[3], 'base64');
+  const actual = crypto.pbkdf2Sync(plain, salt, iter, expected.length, PBKDF2_DIGEST);
+  if (expected.length !== actual.length) return false;
+  return crypto.timingSafeEqual(expected, actual);
+}
+
 // ============== JWT ==============
 
 function signToken(user) {
@@ -96,7 +128,6 @@ function verifyToken(authHeader) {
 }
 
 // ============== MERCADO PAGO CLIENT ==============
-// Único lugar com acesso ao MP_ACCESS_TOKEN.
 
 async function mpRequest(method, endpoint, body) {
   const url = `https://api.mercadopago.com${endpoint}`;
@@ -126,29 +157,42 @@ async function mpRequest(method, endpoint, body) {
   return data;
 }
 
-async function createMpPreference({ userId, planType, plan, payerEmail }) {
-  const externalRef = `lilo_${userId}_${planType}_${Date.now()}`;
-
-  return mpRequest('POST', '/checkout/preferences', {
-    items: [{
-      id: `plan_${planType}`,
-      title: plan.title,
-      description: `Assinatura Lilo ${planType === 'yearly' ? 'anual' : 'mensal'}`,
-      quantity: 1,
-      currency_id: 'BRL',
-      unit_price: plan.price,
-    }],
-    payer: payerEmail ? { email: payerEmail } : undefined,
-    metadata: { user_id: userId, plan_type: planType },
-    external_reference: externalRef,
-    back_urls: {
-      success: `${config.frontendUrl()}/?payment=success`,
-      failure: `${config.frontendUrl()}/?payment=failure`,
-      pending: `${config.frontendUrl()}/?payment=pending`,
+// ===== BRICKS: pagamento PIX avulso =====
+// Pix não tem recorrência automática do MP — sempre é avulso.
+async function createPixPayment({ userId, planType, plan, payerEmail, payerName, payerCpf }) {
+  return mpRequest('POST', '/v1/payments', {
+    transaction_amount: plan.price,
+    description: plan.title,
+    payment_method_id: 'pix',
+    payer: {
+      email: payerEmail,
+      first_name: payerName ? payerName.split(' ')[0] : undefined,
+      last_name:  payerName ? payerName.split(' ').slice(1).join(' ') : undefined,
+      identification: payerCpf ? { type: 'CPF', number: payerCpf.replace(/\D/g, '') } : undefined,
     },
-    auto_return: 'approved',
+    metadata: { user_id: userId, plan_type: planType, payment_kind: 'pix_one_time' },
     notification_url: `${config.appUrl()}/.netlify/functions/webhook-mercadopago`,
-    statement_descriptor: 'LILO',
+    external_reference: `lilo_pix_${userId}_${planType}_${Date.now()}`,
+  });
+}
+
+// ===== BRICKS: assinatura recorrente com cartão =====
+// Usa /preapproval com card_token gerado pelo SDK no frontend.
+async function createCardSubscription({ userId, planType, plan, payerEmail, cardTokenId }) {
+  return mpRequest('POST', '/preapproval', {
+    reason: plan.title,
+    auto_recurring: {
+      frequency: plan.frequency,
+      frequency_type: plan.frequencyType,
+      transaction_amount: plan.price,
+      currency_id: 'BRL',
+    },
+    payer_email: payerEmail,
+    card_token_id: cardTokenId,
+    status: 'authorized',
+    external_reference: `lilo_sub_${userId}_${planType}`,
+    back_url: `${config.frontendUrl()}/?payment=success`,
+    notification_url: `${config.appUrl()}/.netlify/functions/webhook-mercadopago`,
   });
 }
 
@@ -156,16 +200,23 @@ async function getMpPayment(paymentId) {
   return mpRequest('GET', `/v1/payments/${paymentId}`);
 }
 
+async function getMpSubscription(subscriptionId) {
+  return mpRequest('GET', `/preapproval/${subscriptionId}`);
+}
+
+async function cancelMpSubscription(subscriptionId) {
+  return mpRequest('PUT', `/preapproval/${subscriptionId}`, { status: 'cancelled' });
+}
+
 // ============== WEBHOOK SIGNATURE VALIDATION ==============
 
 function isValidWebhookSignature({ headers, query, body }) {
-  const signatureHeader = headers['x-signature'];
-  const requestId = headers['x-request-id'];
+  const signatureHeader = headers['x-signature'] || headers['X-Signature'];
+  const requestId = headers['x-request-id'] || headers['X-Request-Id'];
   const dataId = (query && query['data.id']) || (body && body.data && body.data.id);
 
   if (!signatureHeader || !requestId || !dataId) return false;
 
-  // Parse "ts=...,v1=..."
   const parts = signatureHeader.split(',').map(s => s.trim());
   const map = {};
   for (const p of parts) {
@@ -193,10 +244,14 @@ module.exports = {
   supabase,
   json,
   corsPreflight,
+  hashPassword,
+  verifyPassword,
   signToken,
   verifyToken,
-  bcrypt,
-  createMpPreference,
+  createPixPayment,
+  createCardSubscription,
   getMpPayment,
+  getMpSubscription,
+  cancelMpSubscription,
   isValidWebhookSignature,
 };

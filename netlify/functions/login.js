@@ -2,7 +2,7 @@
 // POST /api/login
 // Body: { email, password }
 
-const { supabase, json, corsPreflight, signToken, bcrypt } = require('./_shared');
+const { supabase, json, corsPreflight, signToken, verifyPassword } = require('./_shared');
 
 exports.handler = async (event) => {
   if (event.httpMethod === 'OPTIONS') return corsPreflight();
@@ -19,11 +19,22 @@ exports.handler = async (event) => {
       .eq('email', email)
       .maybeSingle();
 
-    if (error || !user) return json(401, { error: 'credenciais inválidas' });
+    if (error) {
+      console.error('[login] erro Supabase:', error);
+      return json(500, { error: 'database_error', detail: error.message });
+    }
+    if (!user) {
+      console.log('[login] email não cadastrado:', email);
+      return json(401, { error: 'credenciais inválidas' });
+    }
 
-    const ok = await bcrypt.compare(password, user.password_hash);
-    if (!ok) return json(401, { error: 'credenciais inválidas' });
+    const ok = verifyPassword(password, user.password_hash);
+    if (!ok) {
+      console.log('[login] senha incorreta para:', email);
+      return json(401, { error: 'credenciais inválidas' });
+    }
 
+    console.log('[login] OK userId:', user.id);
     return json(200, {
       user: {
         id: user.id, name: user.name, email: user.email,
@@ -34,7 +45,7 @@ exports.handler = async (event) => {
       token: signToken(user),
     });
   } catch (err) {
-    console.error('[login]', err);
-    return json(500, { error: 'server_error' });
+    console.error('[login] exception:', err);
+    return json(500, { error: 'server_error', detail: err.message });
   }
 };

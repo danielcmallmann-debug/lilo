@@ -1,10 +1,9 @@
 // netlify/functions/_shared.js
 // ===================================================
-// Helpers compartilhados.
-// - Sem bcryptjs (usa crypto nativo do Node, infalível em serverless)
-// - Cliente Supabase
-// - Cliente Mercado Pago (Bricks: pagamentos + assinaturas)
-// - Validação de webhook
+// v3 — Pagamento avulso de cartão (sem /preapproval)
+// /preapproval foi removido porque exige habilitação
+// de produto "Assinaturas" na conta MP. Avulso funciona
+// em test e produção sem qualquer config adicional.
 // ===================================================
 
 const { createClient } = require('@supabase/supabase-js');
@@ -37,20 +36,16 @@ const config = {
       price: parseFloat(env('PLAN_MONTHLY_PRICE', false) || '29.90'),
       title: 'Lilo Premium - Mensal',
       durationDays: 30,
-      frequency: 1,
-      frequencyType: 'months',
     },
     yearly: {
       price: parseFloat(env('PLAN_YEARLY_PRICE', false) || '299.00'),
       title: 'Lilo Premium - Anual',
       durationDays: 365,
-      frequency: 12,
-      frequencyType: 'months',
     },
   },
 };
 
-// ============== SUPABASE CLIENT ==============
+// ============== SUPABASE ==============
 
 let _supabase = null;
 function supabase() {
@@ -62,7 +57,7 @@ function supabase() {
   return _supabase;
 }
 
-// ============== HTTP HELPERS ==============
+// ============== HTTP ==============
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -82,9 +77,7 @@ function corsPreflight() {
   return { statusCode: 204, headers: CORS_HEADERS, body: '' };
 }
 
-// ============== PASSWORD HASHING (crypto nativo) ==============
-// Substitui bcryptjs. Usa PBKDF2 com 100k iterações + salt aleatório.
-// Formato armazenado: "pbkdf2$<iter>$<salt_b64>$<hash_b64>"
+// ============== SENHA (PBKDF2) ==============
 
 const PBKDF2_ITER   = 100000;
 const PBKDF2_KEYLEN = 64;
@@ -127,7 +120,7 @@ function verifyToken(authHeader) {
   } catch { return null; }
 }
 
-// ============== MERCADO PAGO CLIENT ==============
+// ============== MERCADO PAGO ==============
 
 async function mpRequest(method, endpoint, body) {
   const url = `https://api.mercadopago.com${endpoint}`;
@@ -140,8 +133,7 @@ async function mpRequest(method, endpoint, body) {
   }
 
   const res = await fetch(url, {
-    method,
-    headers,
+    method, headers,
     body: body ? JSON.stringify(body) : undefined,
   });
   const text = await res.text();
@@ -157,8 +149,7 @@ async function mpRequest(method, endpoint, body) {
   return data;
 }
 
-// ===== BRICKS: pagamento PIX avulso =====
-// Pix não tem recorrência automática do MP — sempre é avulso.
+// ===== PIX avulso =====
 async function createPixPayment({ userId, planType, plan, payerEmail, payerName, payerCpf }) {
   return mpRequest('POST', '/v1/payments', {
     transaction_amount: plan.price,
@@ -170,29 +161,24 @@ async function createPixPayment({ userId, planType, plan, payerEmail, payerName,
       last_name:  payerName ? payerName.split(' ').slice(1).join(' ') : undefined,
       identification: payerCpf ? { type: 'CPF', number: payerCpf.replace(/\D/g, '') } : undefined,
     },
-    metadata: { user_id: userId, plan_type: planType, payment_kind: 'pix_one_time' },
+    metadata: { user_id: userId, plan_type: planType, payment_kind: 'pix' },
     notification_url: `${config.appUrl()}/.netlify/functions/webhook-mercadopago`,
     external_reference: `lilo_pix_${userId}_${planType}_${Date.now()}`,
   });
 }
 
-// ===== BRICKS: assinatura recorrente com cartão =====
-// Usa /preapproval com card_token gerado pelo SDK no frontend.
-async function createCardSubscription({ userId, planType, plan, payerEmail, cardTokenId }) {
-  return mpRequest('POST', '/preapproval', {
-    reason: plan.title,
-    auto_recurring: {
-      frequency: plan.frequency,
-      frequency_type: plan.frequencyType,
-      transaction_amount: plan.price,
-      currency_id: 'BRL',
-    },
-    payer_email: payerEmail,
-    card_token_id: cardTokenId,
-    status: 'authorized',
-    external_reference: `lilo_sub_${userId}_${planType}`,
-    back_url: `${config.frontendUrl()}/?payment=success`,
+// ===== CARTÃO avulso (substitui /preapproval) =====
+async function createCardPayment({ userId, planType, plan, payerEmail, cardTokenId, installments }) {
+  return mpRequest('POST', '/v1/payments', {
+    transaction_amount: plan.price,
+    description: plan.title,
+    token: cardTokenId,
+    installments: installments || 1,
+    payer: { email: payerEmail },
+    metadata: { user_id: userId, plan_type: planType, payment_kind: 'card' },
     notification_url: `${config.appUrl()}/.netlify/functions/webhook-mercadopago`,
+    external_reference: `lilo_card_${userId}_${planType}_${Date.now()}`,
+    statement_descriptor: 'LILO',
   });
 }
 
@@ -200,15 +186,7 @@ async function getMpPayment(paymentId) {
   return mpRequest('GET', `/v1/payments/${paymentId}`);
 }
 
-async function getMpSubscription(subscriptionId) {
-  return mpRequest('GET', `/preapproval/${subscriptionId}`);
-}
-
-async function cancelMpSubscription(subscriptionId) {
-  return mpRequest('PUT', `/preapproval/${subscriptionId}`, { status: 'cancelled' });
-}
-
-// ============== WEBHOOK SIGNATURE VALIDATION ==============
+// ============== WEBHOOK SIGNATURE ==============
 
 function isValidWebhookSignature({ headers, query, body }) {
   const signatureHeader = headers['x-signature'] || headers['X-Signature'];
@@ -237,8 +215,6 @@ function isValidWebhookSignature({ headers, query, body }) {
   return crypto.timingSafeEqual(a, b);
 }
 
-// ============== EXPORTS ==============
-
 module.exports = {
   config,
   supabase,
@@ -249,9 +225,7 @@ module.exports = {
   signToken,
   verifyToken,
   createPixPayment,
-  createCardSubscription,
+  createCardPayment,
   getMpPayment,
-  getMpSubscription,
-  cancelMpSubscription,
   isValidWebhookSignature,
 };

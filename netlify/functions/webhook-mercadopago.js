@@ -1,14 +1,9 @@
 // netlify/functions/webhook-mercadopago.js
-// ===================================================
-// Recebe webhooks do MP. Trata 3 tipos:
-//   - payment           → pagamentos avulsos (Pix)
-//   - subscription_*    → assinaturas recorrentes (cartão)
-//   - subscription_authorized_payment → cobrança recorrente bem-sucedida
-// ===================================================
+// v3 — só trata pagamentos avulsos (cartão e Pix)
 
 const {
   supabase, json, corsPreflight,
-  isValidWebhookSignature, getMpPayment, getMpSubscription, config,
+  isValidWebhookSignature, getMpPayment, config,
 } = require('./_shared');
 
 exports.handler = async (event) => {
@@ -65,12 +60,10 @@ exports.handler = async (event) => {
 
   const eventDbId = insertedEvent.id;
 
-  // ===== 4. ROTEAMENTO =====
+  // ===== 4. PROCESSAR =====
   try {
-    if (eventType === 'payment' || eventType?.startsWith('payment.')) {
+    if (eventType === 'payment' || (eventType && eventType.startsWith('payment.'))) {
       await handlePayment(sb, resourceId);
-    } else if (eventType?.startsWith('subscription_') || eventType === 'preapproval') {
-      await handleSubscription(sb, resourceId);
     } else {
       console.log(`[webhook] tipo não tratado: ${eventType}`);
     }
@@ -89,8 +82,7 @@ exports.handler = async (event) => {
   }
 };
 
-// ============== HANDLER: pagamento avulso (Pix) ==============
-
+// Trata pagamento (cartão ou Pix) - ambos chegam como type=payment
 async function handlePayment(sb, paymentId) {
   const payment = await getMpPayment(paymentId);
 
@@ -102,6 +94,7 @@ async function handlePayment(sb, paymentId) {
     return;
   }
 
+  // Upsert
   await sb.from('payments').upsert({
     user_id:        userId,
     mp_payment_id:  String(payment.id),
@@ -116,7 +109,7 @@ async function handlePayment(sb, paymentId) {
 
   if (payment.status === 'approved') {
     const plan = config.plans[planType];
-    // Se já tinha acesso ativo, ESTENDE ao invés de sobrescrever
+    // ESTENDE acesso (não sobrescreve se já tinha)
     const { data: u } = await sb.from('users')
       .select('access_expires_at').eq('id', userId).maybeSingle();
     const baseDate = (u?.access_expires_at && new Date(u.access_expires_at) > new Date())
@@ -131,46 +124,8 @@ async function handlePayment(sb, paymentId) {
       access_expires_at: expiresAt,
     }).eq('id', userId);
 
-    console.log(`[webhook] PIX aprovado user=${userId}, expira=${expiresAt}`);
+    console.log(`[webhook] aprovado user=${userId}, expira=${expiresAt}, método=${payment.payment_method_id}`);
   } else if (payment.status === 'rejected' || payment.status === 'cancelled') {
-    console.log(`[webhook] PIX ${payment.status} user=${userId}`);
-  }
-}
-
-// ============== HANDLER: assinatura recorrente ==============
-
-async function handleSubscription(sb, subscriptionId) {
-  const sub = await getMpSubscription(subscriptionId);
-  console.log('[webhook] subscription status:', sub.status, 'id:', sub.id);
-
-  // external_reference: lilo_sub_<userId>_<planType>
-  const ref = sub.external_reference || '';
-  const parts = ref.split('_');
-  const userId   = parts[2];
-  const planType = parts[3];
-
-  if (!userId || !planType) {
-    console.warn(`[webhook] subscription ${subscriptionId} sem reference válida: ${ref}`);
-    return;
-  }
-
-  if (sub.status === 'authorized') {
-    const plan = config.plans[planType];
-    const expiresAt = new Date(Date.now() + plan.durationDays * 24*60*60*1000).toISOString();
-
-    await sb.from('users').update({
-      payment_status:    'approved',
-      plan_type:         planType,
-      subscription_id:   subscriptionId,
-      auto_renew:        true,
-      access_expires_at: expiresAt,
-    }).eq('id', userId);
-
-    console.log(`[webhook] subscription autorizada user=${userId}`);
-  } else if (sub.status === 'paused' || sub.status === 'cancelled') {
-    await sb.from('users').update({
-      auto_renew: false,
-    }).eq('id', userId);
-    console.log(`[webhook] subscription ${sub.status} user=${userId}`);
+    console.log(`[webhook] ${payment.status} user=${userId}`);
   }
 }

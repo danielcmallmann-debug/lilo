@@ -1,12 +1,6 @@
 // netlify/functions/create-pix.js
-// ===================================================
 // POST /api/create-pix
-// Body: { plan_type: 'monthly'|'yearly', payer: { name, cpf } }
-//
-// Cria pagamento Pix avulso. Pix não tem recorrência automática,
-// então o usuário paga 1x e o webhook libera acesso por N dias.
-// Para renovar, usuário gera outro Pix.
-// ===================================================
+// Body: { plan_type, payer: { name, cpf } }
 
 const {
   supabase, json, corsPreflight, verifyToken,
@@ -56,13 +50,12 @@ exports.handler = async (event) => {
       raw_payload: payment,
     });
 
-    // Retorna QR code + copia-e-cola para o frontend exibir
     const td = payment.point_of_interaction?.transaction_data || {};
     return json(200, {
       payment_id: payment.id,
       status: payment.status,
-      qr_code: td.qr_code,                 // string copia-e-cola
-      qr_code_base64: td.qr_code_base64,   // imagem base64
+      qr_code: td.qr_code,
+      qr_code_base64: td.qr_code_base64,
       ticket_url: td.ticket_url,
       expires_at: payment.date_of_expiration,
     });

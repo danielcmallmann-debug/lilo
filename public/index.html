@@ -2262,10 +2262,10 @@ if (!localStorage.getItem('lilo_jwt')) {
     <!-- ESCOLHA MÉTODO -->
     <div class="pay-method-tabs">
       <div class="pay-method-tab active" id="tabCard" onclick="paywall.selectMethod('card')">
-        💳 Cartão (renova auto)
+        💳 Cartão
       </div>
       <div class="pay-method-tab" id="tabPix" onclick="paywall.selectMethod('pix')">
-        ⚡ Pix (avulso)
+        ⚡ Pix
       </div>
     </div>
 
@@ -2464,14 +2464,15 @@ const paywall = (function(){
           // cardFormData.token = card_token gerado pelo SDK
           showStatus('Processando pagamento...', 'pending');
           try {
-            const res = await apiCall('/create-subscription', {
+            const res = await apiCall('/create-payment', {
               method: 'POST',
               body: JSON.stringify({
                 plan_type: selectedPlan,
                 card_token_id: cardFormData.token,
+                installments: cardFormData.installments || 1,
               }),
             });
-            if (res.authorized) {
+            if (res.approved) {
               showStatus('✓ Pagamento aprovado! Liberando acesso...', 'success');
               setTimeout(() => gateAccess(), 1500);
             } else {
